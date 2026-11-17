@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>РобоАрена 3D</title>
+<link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+<style>
+  /* ════════════════════════════════════════════════════════════════════
+     РобоАрена 3D — визуальный язык «Robotics Control Lab».
+     Графитовые поверхности с холодным подтоном, сигнальный оранжевый
+     акцент, бирюзовый и индиго для слоёв данных/аккаунта. Все прежние
+     селекторы и раскладочные правила сохранены — JS работает как раньше.
+     ════════════════════════════════════════════════════════════════════ */
+  :root {
+    --bg: #0e1117;
+    --bg2: #151a22;
+    --bg3: #1e2530;
+    --bg4: #27303e;
+    --line: #2b3442;
+    --line2: #3c4859;
+    --text: #e7ecf3;
+    --muted: #8b96a7;
+    --accent: #ff8a2a;
+    --accent-soft: rgba(255, 138, 42, .14);
+    --accent2: #2dd4bf;
+    --accent3: #818cf8;
+    --danger: #f2555a;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --info: #38bdf8;
+    /* Н8-2: панель почти непрозрачна — backdrop-blur над WebGL-канвасом
+       не виден, но пересчитывается каждый кадр и «подлагаживает» панели */
+    --panel: rgba(17, 21, 29, .96);
+    --viewport-bg: #0a0c11;
+    --shadow: 0 14px 44px rgba(0, 0, 0, .5);
+  }
+  [data-theme="light"] {
+    --bg: #eceff5;
+    --bg2: #ffffff;
+    --bg3: #e7ecf3;
+    --bg4: #dbe2ec;
+    --line: #ccd4e0;
+    --line2: #b4bfd0;
+    --text: #1a2230;
+    --muted: #5d6b7e;
+    --accent: #e8720c;
+    --accent-soft: rgba(232, 114, 12, .12);
+    --accent2: #0d9488;
+    --accent3: #5b6cf0;
+    --danger: #d3353b;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --info: #0284c7;
+    --panel: rgba(255, 255, 255, .97);
+    --viewport-bg: #d4dae4;
+    --shadow: 0 14px 40px rgba(30, 40, 60, .18);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--text);
+    font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    display: grid; grid-template-rows: auto 1fr auto; height: 100vh; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Скроллбары в стиле интерфейса (везде, где есть прокрутка) */
+  * { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 5px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  button, select, input[type=checkbox] { accent-color: var(--accent); }
+  button, select {
+    background: var(--bg3); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 5px 11px; font: inherit; cursor: pointer;
+    height: 32px; transition: border-color .14s, background .14s, color .14s, box-shadow .14s, transform .06s;
+  }
+  button:hover, select:hover { border-color: var(--accent); background: var(--bg4); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
+  button.primary {
+    background: var(--accent); border-color: transparent; color: #201203; font-weight: 700;
+  }
+  button.primary:hover { background: var(--accent); filter: brightness(1.07); transform: translateY(-1px); }
+  button.primary:active { transform: translateY(0); }
+  button.warn { border-color: var(--danger); color: var(--danger); background: transparent; }
+  button.warn:hover { background: rgba(242, 85, 90, .1); border-color: var(--danger); }
+  button.ibtn { width: 34px; padding: 0; text-align: center; flex: none; display: inline-grid; place-items: center; }
+  button.ibtn svg { width: 16px; height: 16px; vertical-align: middle; }
+  button.ibtn.off { opacity: .42; }
+  button.ibtn[disabled] { opacity: .34; cursor: default; }
+  button.ibtn[disabled]:hover { border-color: var(--line); background: var(--bg3); }
+  button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  select { padding: 5px 8px; }
+  label.chk { color: var(--muted); font-size: 12px; display: flex; gap: 5px; align-items: center; }
+
+  /* ── Верхняя панель ── */
+  #topbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; position: relative; z-index: 20;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .12);
+  }
+  #topbar .logo {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 15px; letter-spacing: .3px; margin-right: 8px; white-space: nowrap;
+  }
+  #topbar .logo .logo-badge {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 17px; background: var(--accent-soft); border: 1px solid var(--line); color: var(--accent);
+  }
+  #topbar .logo .logo-badge svg { width: 20px; height: 20px; display: block; }
+  #topbar .logo b { color: var(--accent); }
+  .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; flex: none; }
+  .flex-spacer { flex: 1; }
+  #compile-status {
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+    padding: 4px 13px; border-radius: 20px; background: var(--bg3); border: 1px solid var(--line);
+    max-width: 320px; overflow: hidden; text-overflow: ellipsis; height: 27px; line-height: 18px;
+  }
+  #compile-status.err { color: #ff9ea2; border-color: var(--danger); background: rgba(242, 85, 90, .12); }
+  #compile-status.ok { color: #7ddd9a; border-color: var(--ok); background: rgba(74, 222, 128, .1); }
+  [data-theme="light"] #compile-status.err { color: #b91c1c; }
+  [data-theme="light"] #compile-status.ok { color: #15803d; }
+
+  /* ── Чип аккаунта в тулбаре ── */
+  .account-chip {
+    display: inline-flex; align-items: center; gap: 9px; height: 40px;
+    padding: 3px 14px 3px 4px; border-radius: 22px; background: var(--bg3);
+    border: 1px solid var(--line); flex: none;
+  }
+  .account-chip:hover { border-color: var(--accent); background: var(--bg4); }
+  .ac-avatar {
+    width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+    font-weight: 700; font-size: 12px; color: #201203; background: var(--accent); flex: none;
+    letter-spacing: .3px;
+  }
+  .ac-avatar svg { width: 17px; height: 17px; color: #201203; }
+  .account-chip[data-role=student] .ac-avatar { background: #38bdf8; color: #04222b; }
+  .account-chip[data-role=teacher] .ac-avatar { background: #818cf8; color: #1a103a; }
+  .account-chip[data-role=guest] .ac-avatar { background: var(--bg4); }
+  .account-chip[data-role=guest] .ac-avatar svg { color: var(--muted); }
+  .ac-meta { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
+  .ac-name { font-size: 12.5px; font-weight: 600; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-role { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .account-chip.signed .ac-role { color: var(--accent2); }
+
+  /* ── Анимированные выпадающие списки тулбара (Н8-4) ── */
+  .dd { position: relative; display: inline-flex; }
+  .dd-src { display: none !important; }
+  .dd-btn {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 7px;
+    min-width: 132px; max-width: 240px; text-align: left;
+  }
+  .dd-btn[disabled] { opacity: .34; cursor: default; }
+  .dd-btn[disabled]:hover { border-color: var(--line); background: var(--bg3); }
+  .dd-arrow { font-size: 10px; color: var(--muted); transition: transform .16s ease; }
+  .dd-btn.open { border-color: var(--accent); }
+  .dd-btn.open .dd-arrow { transform: rotate(180deg); }
+  .dd-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%; width: max-content;
+    background: var(--panel); border: 1px solid var(--line2); border-radius: 12px;
+    padding: 5px; z-index: 80; box-shadow: var(--shadow);
+    display: none; animation: ddIn .16s ease-out;
+  }
+  .dd-menu.closing { animation: ddOut .14s ease-in forwards; }
+  @keyframes ddIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+  @keyframes ddOut { to { opacity: 0; transform: translateY(-4px) scale(.98); } }
+  .dd-opt {
+    display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px;
+    padding: 7px 11px; font: inherit; font-size: 13px; color: var(--text); cursor: pointer;
+    transition: background .1s;
+  }
+  .dd-opt:hover { background: var(--accent-soft); }
+  .dd-opt.sel { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  /* ── Основная область ── */
+  #main { display: grid; grid-template-columns: var(--edw, minmax(380px, 32%)) 1fr; min-height: 0; position: relative; }
+  #pane-resize {
+    position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px;
+    cursor: col-resize; z-index: 30; touch-action: none;
+  }
+  #pane-resize:hover, #pane-resize.drag { background: linear-gradient(90deg, transparent, rgba(255, 138, 42, .4), transparent); }
+  body.edit-mode #pane-resize { display: none; }
+  #editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--bg2); }
+  #editor-host { flex: 1; min-height: 0; display: flex; }
+  .CodeMirror { height: 100%; font-family: Consolas, "Courier New", monospace; font-size: 13px; background: var(--bg2); color: var(--text); }
+  .CodeMirror-gutters { background: var(--bg2); border-right: 1px solid var(--line); }
+  .CodeMirror-linenumber { color: var(--muted); opacity: .7; }
+  .cm-s-default .cm-keyword { color: #d16ac2; }
+  .cm-s-default .cm-atom { color: #4fc1ff; }
+  .cm-s-default .cm-number { color: #b5cea8; }
+  .cm-s-default .cm-def { color: #dcdcaa; }
+  .cm-s-default .cm-variable { color: #9cdcfe; }
+  .cm-s-default .cm-comment { color: #6a9955; }
+  .cm-s-default .cm-string { color: #ce9178; }
+  [data-theme="light"] .cm-s-default .cm-keyword { color: #af00db; }
+  [data-theme="light"] .cm-s-default .cm-atom { color: #0000ff; }
+  [data-theme="light"] .cm-s-default .cm-number { color: #098658; }
+  [data-theme="light"] .cm-s-default .cm-def { color: #795e26; }
+  [data-theme="light"] .cm-s-default .cm-variable { color: #001080; }
+  [data-theme="light"] .cm-s-default .cm-comment { color: #008000; }
+  [data-theme="light"] .cm-s-default .cm-string { color: #a31515; }
+  .CodeMirror-cursor { border-left: 1px solid var(--text); }
+  .CodeMirror-selected { background: rgba(128, 160, 200, .25) !important; }
+  #editor-status {
+    display: flex; align-items: center; gap: 8px; padding: 8px 11px;
+    border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); background: var(--bg2);
+  }
+  #editor-status .err { color: var(--danger); }
+  #editor-status .ok { color: var(--ok); }
+  #editor-status button, #editor-status select { font-size: 12px; padding: 3px 9px; height: 28px; }
+  #editor-msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  #viewport-pane { position: relative; min-width: 0; min-height: 0; background: var(--viewport-bg); }
+  #viewport-pane canvas { display: block; }
+
+  /* ── Панель судейства ── */
+  #judge {
+    position: absolute; top: 12px; right: 12px; width: 244px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+    padding: 12px 14px; font-size: 13px; pointer-events: none; box-shadow: var(--shadow);
+  }
+  #judge h4, #telemetry h4 {
+    margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px;
+    color: var(--muted); display: flex; align-items: center; gap: 7px; font-weight: 700;
+  }
+  #judge h4::before, #telemetry h4::before {
+    content: ""; width: 4px; height: 13px; border-radius: 2px; background: var(--accent); flex: none;
+  }
+  #judge .row { display: flex; justify-content: space-between; margin: 3px 0; }
+  #judge .row b { font-variant-numeric: tabular-nums; color: var(--accent); }
+  #judge-events { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; color: var(--muted); max-height: 92px; overflow: hidden; }
+  #judge-events div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #judge-events .bad { color: var(--danger); }
+
+  /* ── Панель телеметрии ── */
+  #telemetry {
+    position: absolute; bottom: 12px; right: 12px; width: 244px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+    padding: 12px 14px; font-size: 12px; pointer-events: none; box-shadow: var(--shadow);
+  }
+  #telemetry canvas { display: block; width: 100%; height: 56px; border-radius: 7px; }
+  #telemetry .legend { display: flex; flex-wrap: wrap; gap: 1px 10px; margin: 5px 0 9px; color: var(--muted); }
+  #telemetry .legend:last-child { margin-bottom: 0; }
+  #telemetry .legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #telemetry .legend i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  #telemetry .legend b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #judge-events .good { color: var(--ok); }
+
+  /* ── Панели редакторов (арена и модель робота, поверх вьюпорта) ── */
+  #arena-panel, #builder-panel {
+    position: absolute; top: 12px; right: 12px; width: 282px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+    padding: 12px 14px; font-size: 13px; z-index: 6; box-shadow: var(--shadow);
+  }
+  #builder-panel { max-height: calc(100% - 24px); overflow-y: auto; }
+  #arena-panel h4, #builder-panel h4 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 700; }
+  #arena-panel .ap-title, #builder-panel .ap-title { font-weight: 600; margin-bottom: 6px; }
+
+  /* ── Плашки (пластины) редакторов: добавить / рисовать / сохранить ── */
+  .plate-row { display: flex; gap: 6px; margin: 8px 0; }
+  .plate {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    height: auto; padding: 8px 2px 6px; border-radius: 10px;
+    font: inherit; font-size: 11px; line-height: 1.2; color: var(--muted);
+    background: var(--bg3); border: 1px solid var(--line); cursor: pointer;
+    transition: border-color .14s, background .14s, color .14s, transform .1s;
+  }
+  .plate .ic { font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+  .plate .ic svg { width: 20px; height: 20px; display: block; }
+  /* Inline-иконка внутри текстовой кнопки (тот же контурный стиль, что тулбар) */
+  .bi { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; flex: none; }
+  .plate:hover { border-color: var(--accent); color: var(--text); background: var(--bg4); transform: translateY(-1px); }
+  .plate:active { transform: translateY(0); }
+  .plate.sel, .plate.active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+
+  /* ── Меню-поповеры плашек и окно редактирования выбранного объекта ── */
+  .pop, .eedit {
+    position: absolute; top: 12px; width: 268px;
+    background: var(--panel); border: 1px solid var(--line2); border-radius: 13px;
+    padding: 12px 14px; font-size: 13px; z-index: 7;
+    box-shadow: var(--shadow);
+    animation: popIn .18s ease-out;
+  }
+  .pop { right: calc(282px + 24px); }
+  .eedit { right: calc(282px + 24px); max-height: calc(100% - 24px); overflow-y: auto; }
+  body.edit-mode .pop, body.edit-mode .eedit { left: calc(min(320px, 46%) + 22px); right: auto; }
+  /* Одинаковая толщина поповеров и окна редактирования (ПН9-2): тонкий
+     скроллбар + стабильный отступ под него — контент не «прыгает» по ширине */
+  .pop, .eedit, #arena-panel, #builder-panel {
+    scrollbar-width: thin; scrollbar-color: var(--line2) transparent;
+  }
+  .eedit { scrollbar-gutter: stable; }
+  .pop::-webkit-scrollbar, .eedit::-webkit-scrollbar,
+  #arena-panel::-webkit-scrollbar, #builder-panel::-webkit-scrollbar { width: 6px; }
+  .pop::-webkit-scrollbar-thumb, .eedit::-webkit-scrollbar-thumb,
+  #arena-panel::-webkit-scrollbar-thumb, #builder-panel::-webkit-scrollbar-thumb {
+    background: var(--line2); border-radius: 3px;
+  }
+  .pop::-webkit-scrollbar-track, .eedit::-webkit-scrollbar-track,
+  #arena-panel::-webkit-scrollbar-track, #builder-panel::-webkit-scrollbar-track { background: transparent; }
+  .pop.closing, .eedit.closing { animation: popOut .16s ease-in forwards; }
+  .pop h5, .eedit h5 { margin: 0 0 6px; font-size: 13px; }
+  /* Кнопка ✕ в углу поповера/окна редактирования (просьба 6) */
+  .pop-x {
+    position: absolute; top: 6px; right: 7px; width: 22px; height: 22px;
+    padding: 0; line-height: 1; font-size: 12px; color: var(--muted);
+    background: transparent; border: none; cursor: pointer; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pop-x svg { width: 15px; height: 15px; display: block; }
+  .pop-x:hover { color: var(--text); background: var(--bg4); }
+  /* Призрак перетаскивания карточки из окна добавления на вьюпорт (просьба 7) */
+  .drag-ghost {
+    position: fixed; z-index: 60; pointer-events: none;
+    padding: 5px 11px; font-size: 12px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--accent);
+    border-radius: 9px; box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  }
+  .eedit h5 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+
+  /* ap-* внутри поповеров и окна редактирования (как в панелях) */
+  .pop .ap-sec, .eedit .ap-sec {
+    margin: 10px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line); padding-bottom: 4px;
+  }
+  .pop .ap-lbl, .eedit .ap-lbl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: 6px 0; flex-wrap: wrap; }
+  .pop .ap-lbl select, .eedit .ap-lbl select { flex: 1; min-width: 0; height: 28px; padding: 2px 6px; font-size: 12px; }
+  .pop .ap-lbl input[type=range], .eedit .ap-lbl input[type=range] { flex: 1; min-width: 60px; }
+  .pop .ap-lbl input[type=color], .eedit .ap-lbl input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+  .pop .ap-row, .eedit .ap-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .pop .ap-row button, .eedit .ap-row button { font-size: 12px; padding: 3px 9px; height: 28px; }
+  /* Н12-5: ряд-«стопка» (кнопки очистки в окне «Поле»): каждая кнопка —
+     своя строка во всю ширину поповера. Размер не зависит от надписи,
+     поэтому «Точно?» и возврат текста не двигают соседей (раньше подписи
+     115+118px не влезали в 240px и переносились, а «Точно?» — влезала). */
+  .pop .ap-row.ap-col, .eedit .ap-row.ap-col,
+  #arena-panel .ap-row.ap-col, #builder-panel .ap-row.ap-col {
+    display: grid; grid-template-columns: 1fr; flex-wrap: nowrap;
+  }
+  .pop .ap-row.ap-col button, .eedit .ap-row.ap-col button,
+  #arena-panel .ap-row.ap-col button, #builder-panel .ap-row.ap-col button {
+    width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pop .ap-val, .eedit .ap-val { font-size: 12px; color: var(--text); min-width: 44px; text-align: right; }
+  .pop .ap-hint, .eedit .ap-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .pop .chip-grid, .eedit .chip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 6px 0; }
+
+  /* числовая строка окна редактирования: подпись + поле */
+  .num-row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+  .num-row .lb { flex: 1; font-size: 12px; color: var(--muted); }
+  .num-row input[type=number] {
+    width: 62px; height: 26px; font: inherit; font-size: 12px;
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 7px;
+    color: var(--text); padding: 2px 5px;
+  }
+  .num-row input[type=color] { width: 40px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+  .num-row input[type=checkbox] { width: 16px; height: 16px; }
+  .num-row .ax { font-size: 11px; color: var(--muted); opacity: .8; }
+  .num-row select {
+    height: 26px; font: inherit; font-size: 12px;
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 7px;
+    color: var(--text); padding: 1px 4px; min-width: 46px;
+  }
+  /* Н29-2b: карточка источника света в поповере «Свет» */
+  .light-card { border: 1px solid var(--line); border-radius: 9px; padding: 7px 8px; margin: 7px 0; background: var(--bg3); }
+  .light-card .lc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  .light-card .lc-name { flex: 1; font-size: 12px; color: var(--text); font-weight: 600; }
+  .light-card .lc-color { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+  .light-card .lc-del { height: 24px; padding: 0 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg4); color: var(--text); cursor: pointer; }
+  .light-card .lc-del:hover { border-color: var(--danger); color: var(--danger); }
+  .light-card .num-row input[type=number] { width: 52px; }
+  .bp-status { min-height: 16px; font-size: 12px; margin-top: 4px; color: var(--danger); }
+
+  /* ── Режим редактора: окно редактора вместо кода и serial ── */
+  body.edit-mode #editor-pane, body.edit-mode #serial-pane { display: none; }
+  body.edit-mode #main { grid-template-columns: 1fr; }
+  /* Кнопка скрытия кода — в тулбаре рядом с «глазом» судейства (ПН9-1);
+     в режиме редакторов робота/арены код скрыт принудительно — кнопка не нужна */
+  body.edit-mode #btn-code-eye { display: none; }
+  /* Скрытый редактор кода: колонка схлопывается, вьюпорт на всю ширину.
+     Н1: при display:none у editor-pane и pane-resize автозаполнитель грида
+     ставил viewport-pane в ПЕРВУЮ колонку (0px) — канвас рендерился 800×600
+     в углу, а судейство/телеметрия (right:10px от нулевой ширины) уезжали за
+     левый край экрана. Явно закрепляем вьюпорт во второй колонке. */
+  body.code-hidden #editor-pane, body.code-hidden #pane-resize { display: none; }
+  body.code-hidden #main { grid-template-columns: 0 1fr; }
+  body.code-hidden #viewport-pane { grid-column: 2; }
+  /* появление/уход панели кода (уход ставит .closing, скрытие — после конца) */
+  #editor-pane { animation: codeIn .2s ease-out; }
+  #editor-pane.closing { animation: codeOut .18s ease-in forwards; }
+  body.edit-mode #arena-panel, body.edit-mode #builder-panel,
+  #arena-panel.closing, #builder-panel.closing {
+    left: 12px; right: auto; top: 12px; bottom: auto;
+    width: 268px; max-height: 46%; overflow-y: auto; overflow-x: hidden;
+  }
+  /* поповеры/окно редактирования: под панелью, точную координату ставит JS */
+  body.edit-mode .pop, body.edit-mode .eedit { left: 12px; right: auto; }
+  body.edit-mode .pop { max-height: calc(54% - 26px); overflow-y: auto; }
+  body.edit-mode .eedit { max-height: calc(54% - 26px); overflow-y: auto; }
+  #arena-panel .ap-sec, #builder-panel .ap-sec {
+    margin: 12px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line); padding-bottom: 4px;
+  }
+
+  /* ── Чипы выбора с 3D-пиктограммами ── */
+  #arena-panel .chip-grid, #builder-panel .chip-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 6px 0;
+  }
+  .chip {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 2px 5px; height: auto; border-radius: 9px;
+    font: inherit; font-size: 10px; line-height: 1.15; color: var(--muted);
+    background: var(--bg3); border: 1px solid var(--line); cursor: pointer;
+    text-align: center; transition: border-color .14s, background .14s, color .14s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--text); background: var(--bg4); }
+  .chip.sel { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+  .chip svg { width: 34px; height: 27px; }
+
+  /* ── Сегментный переключатель (режим гизмо и вкладки редакторов) ── */
+  .seg { display: flex; gap: 4px; margin: 6px 0; }
+  .seg button {
+    flex: 1; font: inherit; font-size: 12px; padding: 5px 8px; height: 30px;
+    color: var(--muted); background: var(--bg3); border: 1px solid var(--line);
+    border-radius: 9px; cursor: pointer; transition: border-color .14s, background .14s, color .14s;
+  }
+  .seg button:hover { border-color: var(--accent); color: var(--text); }
+  .seg button.sel { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+
+  /* ── Вкладки редакторов (сворачиваемые секции) ── */
+  .atab { border: 1px solid var(--line); border-radius: 11px; margin: 8px 0; overflow: hidden; background: var(--bg3); }
+  .atab > .atab-head {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    font: inherit; font-size: 12px; font-weight: 600; color: var(--text);
+    background: none; border: none; padding: 8px 11px; cursor: pointer; text-align: left;
+  }
+  .atab > .atab-head:hover { background: var(--accent-soft); }
+  .atab > .atab-head .atab-arrow { margin-left: auto; transition: transform .18s ease; font-size: 10px; color: var(--muted); }
+  .atab.collapsed > .atab-head .atab-arrow { transform: rotate(-90deg); }
+  .atab > .atab-body { padding: 2px 11px 9px; animation: atabIn .18s ease-out; }
+  .atab.collapsed > .atab-body { display: none; }
+  @keyframes atabIn { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+  .add-cards { display: flex; gap: 6px; margin: 6px 0; }
+  .add-card {
+    flex: 1; height: auto; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 9px 4px; font-size: 11px; color: var(--muted);
+  }
+  .add-card:hover { color: var(--text); }
+  .add-card svg { width: 46px; height: 36px; }
+
+  #arena-panel .ap-lbl, #builder-panel .ap-lbl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: 6px 0; flex-wrap: wrap; }
+  #arena-panel .ap-lbl select, #builder-panel .ap-lbl select { flex: 1; min-width: 0; height: 28px; padding: 2px 6px; font-size: 12px; }
+  #arena-panel .ap-lbl input[type=range], #builder-panel .ap-lbl input[type=range] { flex: 1; min-width: 60px; }
+  #arena-panel .ap-lbl input[type=color], #builder-panel .ap-lbl input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+  #arena-panel .ap-row, #builder-panel .ap-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  #arena-panel .ap-row button, #builder-panel .ap-row button { font-size: 12px; padding: 3px 9px; height: 28px; }
+  #arena-panel .ap-val, #builder-panel .ap-val { font-size: 12px; color: var(--text); min-width: 44px; text-align: right; }
+  #arena-panel .ap-sep, #builder-panel .ap-sep { height: 1px; background: var(--line); margin: 8px 0; }
+  #arena-panel .ap-hint, #builder-panel .ap-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  #builder-panel .ctl { margin: 8px 0; }
+  #builder-panel .ctl label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  #builder-panel .ctl input[type=range] { width: 100%; }
+  #builder-panel .ctl .val { font-size: 12px; color: var(--text); float: right; }
+
+  #banner {
+    position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%);
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 16px;
+    padding: 20px 38px; text-align: center; display: none; backdrop-filter: blur(4px);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, .5), 0 0 0 4px var(--accent-soft);
+  }
+  #banner.show { display: block; }
+  #banner h2 { margin: 0 0 6px; font-size: 22px; }
+  #banner p { margin: 0; color: var(--muted); }
+
+  /* ── Серийник ── */
+  #serial-pane { border-top: 1px solid var(--line); background: var(--bg2); display: flex; flex-direction: column; height: 172px; flex-shrink: 0; }
+  #serial-head { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  #serial-head b { color: var(--text); letter-spacing: .3px; }
+  #serial-head button { font-size: 12px; padding: 2px 8px; height: 26px; }
+  #serial-log {
+    flex: 1; overflow-y: auto; margin: 0; padding: 7px 12px;
+    font: 12px/1.5 Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  #serial-log .sys { color: var(--muted); }
+  #serial-log .err { color: var(--danger); }
+
+  /* ── Оверлеи ── */
+  .overlay { position: fixed; inset: 0; background: rgba(5, 8, 12, .62); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--line2); border-radius: 16px;
+    width: min(860px, 92vw); max-height: 88vh; overflow: auto; padding: 20px 24px;
+    box-shadow: var(--shadow); position: relative;
+  }
+  .modal::before {
+    content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 3px;
+    border-radius: 0 0 3px 3px; background: var(--accent); opacity: .85;
+  }
+  .modal.narrow { width: min(760px, 92vw); }
+  .modal h3 { margin: 4px 0 14px; font-size: 18px; }
+  .modal h3 span.x { float: right; cursor: pointer; color: var(--muted); font-weight: 400; }
+  .modal h3 span.x:hover { color: var(--text); }
+  .modal h3 span.x svg { width: 16px; height: 16px; display: block; }
+  .modal h3 .bi { color: var(--accent); }
+  .modal table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .modal td, .modal th { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+  .modal th { background: var(--bg3); }
+  .modal code { background: var(--bg3); padding: 1px 6px; border-radius: 5px; font-family: Consolas, monospace; }
+  .modal ul { margin: 8px 0; padding-left: 20px; }
+  .modal p { margin: 10px 0 0; }
+  .modal .ctl { margin: 12px 0; }
+  .modal .ctl label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; letter-spacing: .3px; }
+  .modal .ctl select { width: 100%; max-width: 260px; height: 36px; }
+
+  /* ── Легенды/подсказки (справка) ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .hint { color: var(--muted); font-size: 12px; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Аккаунт: оверлей входа / регистрации / профиля
+     ════════════════════════════════════════════════════════════════════ */
+  .account-modal { width: min(900px, 94vw); padding: 0; overflow: hidden; }
+  .account-modal::before { display: none; }
+  .ac-close {
+    position: absolute; top: 12px; right: 14px; z-index: 5; width: 30px; height: 30px;
+    padding: 0; border-radius: 9px; display: grid; place-items: center; font-size: 14px;
+    background: rgba(0, 0, 0, .22); border: 1px solid rgba(255, 255, 255, .18); color: #fff;
+  }
+  .ac-close:hover { background: rgba(0, 0, 0, .4); border-color: rgba(255, 255, 255, .4); }
+  .ac-close svg { width: 16px; height: 16px; display: block; }
+  .ac-grid { display: grid; grid-template-columns: 308px 1fr; min-height: 500px; }
+  .ac-brand {
+    position: relative; padding: 34px 28px; color: #f4f7ff; overflow: hidden;
+    display: flex; flex-direction: column; gap: 16px;
+    background: #1e2742;
+  }
+  .ac-brand::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--accent); pointer-events: none;
+  }
+  .ac-brand-logo {
+    width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center;
+    font-size: 32px; background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .25);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .3); position: relative; color: #fff;
+  }
+  .ac-brand-logo svg { width: 34px; height: 34px; display: block; }
+  .ac-brand h2 { margin: 0; font-size: 24px; letter-spacing: .3px; position: relative; }
+  .ac-brand h2 b { color: #ffd9b0; }
+  .ac-brand-sub { margin: 0; font-size: 13px; line-height: 1.5; color: rgba(244, 247, 255, .85); position: relative; }
+  .ac-brand-points { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 11px; position: relative; }
+  .ac-brand-points li { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.4; color: rgba(244, 247, 255, .92); }
+  .ac-brand-points li::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none;
+    background: #ffd9b0; box-shadow: 0 0 10px rgba(255, 217, 176, .8);
+  }
+  .ac-brand-foot { margin-top: auto; font-size: 11.5px; color: rgba(244, 247, 255, .65); position: relative; }
+
+  .ac-main { padding: 30px 32px; background: var(--bg2); overflow-y: auto; max-height: 88vh; }
+  .ac-tabs { display: flex; gap: 5px; background: var(--bg3); padding: 5px; border-radius: 13px; margin-bottom: 20px; }
+  .ac-tabs button {
+    flex: 1; height: 38px; border: none; background: none; border-radius: 9px;
+    font-weight: 600; font-size: 13.5px; color: var(--muted);
+  }
+  .ac-tabs button:hover { background: var(--bg4); color: var(--text); }
+  .ac-tabs button.sel { background: var(--bg2); color: var(--text); box-shadow: 0 2px 10px rgba(0, 0, 0, .22); }
+  .ac-form { display: flex; flex-direction: column; gap: 13px; }
+  .ac-field { display: flex; flex-direction: column; gap: 6px; }
+  .ac-field > span { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .3px; }
+  .ac-field input {
+    height: 42px; background: var(--bg3); border: 1px solid var(--line); border-radius: 11px;
+    color: var(--text); padding: 0 13px; font: inherit; transition: border-color .14s, box-shadow .14s;
+  }
+  .ac-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .ac-role-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 2px; }
+  .ac-role-pick button {
+    height: auto; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 13px 6px; border-radius: 13px; background: var(--bg3); border: 1px solid var(--line);
+    color: var(--muted); text-align: center;
+  }
+  .ac-role-pick button svg { width: 23px; height: 23px; }
+  .ac-role-pick button b { font-size: 12px; color: var(--text); font-weight: 600; }
+  .ac-role-pick button small { font-size: 10px; line-height: 1.25; color: var(--muted); }
+  .ac-role-pick button:hover { border-color: var(--accent); background: var(--bg4); }
+  .ac-role-pick button.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .ac-role-pick button.sel svg { color: var(--accent); }
+  .ac-submit { height: 46px; font-size: 14.5px; margin-top: 4px; }
+  .ac-err {
+    display: none; font-size: 12.5px; color: var(--danger);
+    background: rgba(242, 85, 90, .1); border: 1px solid rgba(242, 85, 90, .32);
+    padding: 9px 13px; border-radius: 10px; line-height: 1.4;
+  }
+  .ac-err.show { display: block; }
+  .ac-err.ok { color: var(--ok); background: rgba(74, 222, 128, .1); border-color: rgba(74, 222, 128, .32); }
+  .ac-guest-row { text-align: center; margin-top: 18px; }
+  .ac-link { background: none; border: none; color: var(--muted); text-decoration: underline; height: auto; font-size: 12.5px; padding: 4px; }
+  .ac-link:hover { color: var(--accent); background: none; }
+  .ac-hint-text { font-size: 11.5px; color: var(--muted); line-height: 1.4; margin: 0; }
+
+  /* Профиль */
+  .ac-profile-head { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+  .ac-avatar.lg { width: 58px; height: 58px; font-size: 21px; }
+  .ac-avatar.sm { width: 30px; height: 30px; font-size: 11px; }
+  .ac-avatar[data-role=student] { background: #38bdf8; color: #04222b; }
+  .ac-avatar[data-role=teacher] { background: #818cf8; color: #1a103a; }
+  .ac-p-name { font-size: 19px; font-weight: 700; line-height: 1.2; }
+  .ac-p-login { font-size: 12px; color: var(--muted); }
+  .ac-badge {
+    margin-left: auto; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+    padding: 6px 12px; border-radius: 20px; background: var(--accent-soft); color: var(--accent); white-space: nowrap;
+  }
+  .ac-badge[data-role=student] { background: rgba(56, 189, 248, .15); color: var(--info); }
+  .ac-badge[data-role=teacher] { background: rgba(129, 140, 248, .17); color: var(--accent3); }
+  .ac-card { background: var(--bg3); border: 1px solid var(--line); border-radius: 13px; padding: 15px 17px; margin-bottom: 15px; }
+  .ac-card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 11px; }
+  .ac-class-name { font-size: 15px; font-weight: 600; margin-bottom: 9px; }
+  .ac-code-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .ac-code {
+    font-family: Consolas, monospace; font-size: 17px; letter-spacing: 3px; color: var(--accent);
+    background: var(--bg2); padding: 5px 12px; border-radius: 9px; border: 1px dashed var(--line2);
+  }
+  .ac-mini { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; }
+  .ac-mini svg { width: 15px; height: 15px; }
+  .ac-roster-head { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 7px; }
+  .ac-roster { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
+  .ac-roster-row { display: flex; align-items: center; gap: 11px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 11px; }
+  .ac-roster-meta { display: flex; flex-direction: column; line-height: 1.25; }
+  .ac-roster-meta b { font-size: 13px; }
+  .ac-roster-meta span { font-size: 11px; }
+  .ac-crown { margin-left: auto; color: var(--warn); display: grid; place-items: center; }
+  .ac-crown svg { width: 17px; height: 17px; }
+  .ac-stats { display: flex; flex-wrap: wrap; gap: 12px 26px; margin-bottom: 13px; }
+  .ac-stat { display: flex; flex-direction: column; gap: 3px; }
+  .ac-stat span { font-size: 11px; }
+  .ac-stat b { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .ac-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ac-profile-actions { margin-top: 2px; }
+  .ac-muted { color: var(--muted); font-size: 12.5px; margin: 4px 0; }
+  .ac-hint { font-size: 11.5px; }
+  #ac-profile-msg { margin-top: 12px; }
+
+  @media (max-width: 720px) {
+    .account-modal { display: flex; flex-direction: column; }
+    .ac-grid { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+    .ac-brand { padding: 22px 22px; gap: 10px; flex: none; }
+    .ac-brand-points { display: none; }
+    .ac-brand-foot { margin-top: 2px; }
+    .ac-main { padding: 22px 22px; flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+    .ac-role-pick { grid-template-columns: 1fr; }
+    .ac-role-pick button { flex-direction: row; text-align: left; padding: 11px 13px; }
+    .ac-role-pick button small { display: none; }
+  }
+
+  /* ── Анимации меню и панелей ── */
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes popIn { from { opacity: 0; transform: translateY(16px) scale(.96) } to { opacity: 1; transform: none } }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(16px) } to { opacity: 1; transform: none } }
+  @keyframes fadeOut { to { opacity: 0 } }
+  @keyframes popOut { to { opacity: 0; transform: translateY(10px) scale(.97) } }
+  @keyframes slideOut { to { opacity: 0; transform: translateX(16px) } }
+  @keyframes codeIn { from { opacity: 0; transform: translateX(-16px) } to { opacity: 1; transform: none } }
+  @keyframes codeOut { to { opacity: 0; transform: translateX(-16px) } }
+  .overlay.open { animation: fadeIn .16s ease-out; }
+  .overlay.open .modal { animation: popIn .22s cubic-bezier(.2, .9, .3, 1.15); }
+  #arena-panel, #builder-panel { animation: slideIn .2s ease-out; }
+  #judge, #telemetry { animation: slideIn .25s ease-out; }
+  #banner.show { animation: popIn .28s cubic-bezier(.2, .9, .3, 1.15); }
+  /* уход: класс .closing ставит src/ui/anim.js, скрытие — после animationend */
+  .overlay.closing { display: flex; animation: fadeOut .15s ease-in forwards; }
+  .overlay.closing .modal { animation: popOut .18s ease-in forwards; }
+  #arena-panel.closing, #builder-panel.closing { animation: slideOut .16s ease-in forwards; }
+  #judge.closing, #telemetry.closing { animation: slideOut .16s ease-in forwards; }
+  button:active { transform: translateY(1px); }
+  @media (prefers-reduced-motion: reduce) {
+    .overlay.open, .overlay.open .modal, #arena-panel, #builder-panel, #judge, #telemetry, #banner.show, .pop, .eedit, #editor-pane, .dd-menu { animation: none; }
+    .overlay.closing, .overlay.closing .modal, #arena-panel.closing, #builder-panel.closing, #judge.closing, #telemetry.closing, .pop.closing, .eedit.closing, #editor-pane.closing, .dd-menu.closing { animation: none; }
+    .atab > .atab-body { animation: none; }
+    button, select { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SVG-иконки -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Н29-2a: единый стиль иконок — контурная графика, stroke 1.8,
+         скруглённые концы и стыки, fill:none (медиа-кнопки тоже контурные) -->
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6L19 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6M3.5 4.5V10H9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4l6 2 6-2v14l-6 2-6-2-6 2V6l6-2zM9 4v14M15 6v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 1l22 22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M8.5 7L4 12l4.5 5M15.5 7L20 12l-4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M7 15l4-5 3 3 5-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4M12 17.5h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <!-- Аккаунт / классы -->
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2.5 20c0-3.4 3-5.5 6.5-5.5s6.5 2.1 6.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.4M18.5 14.7c2 .7 3 2.3 3 4.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-grad" viewBox="0 0 24 24"><path d="M12 4L2 9l10 5 10-5-10-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11.5V16c0 1.4 2.7 3 6 3s6-1.6 6-3v-4.5M22 9v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 8l4 4 5-7 5 7 4-4-2 11H5L3 8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <!-- Н29-2a: иконки плашек редактора арены (тот же контурный стиль) -->
+    <symbol id="i-field" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3.5 9h17M3.5 15h17M9 3.5v17M15 3.5v17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2.5 4L17 12H5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24"><path d="M14.5 3.5l6 6L11 19H5v-6l9.5-9.5zM12.5 5.5l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 3v18M4 7.5l8 4.5 8-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5L12 15l4.5-4.5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3M7.5 7.5L12 3l4.5 4.5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5l5-5M8 12l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 17M16 12l2.5-2.5a3.5 3.5 0 0 0-5-5L11 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-unlink" viewBox="0 0 24 24"><path d="M8 12l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 17M16 12l2.5-2.5a3.5 3.5 0 0 0-5-5L11 7M4 4l16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="9.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 17l4.5-4.5 3 3L16 11l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-robot" viewBox="0 0 24 24"><path d="M12 2.5v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="2.4" r="1.1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="4.5" y="6" width="15" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2.8 10v4M21.2 10v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9.3" cy="11.5" r="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="14.7" cy="11.5" r="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<header id="topbar">
+  <span class="logo"><span class="logo-badge"><svg><use href="#i-robot"/></svg></span> <span><b>РобоАрена</b> 3D</span></span>
+  <select id="arena-select" data-i18n-tt="title.arena">
+    <option value="line" data-i18n="arena.line">Линия (трасса)</option>
+    <option value="maze" data-i18n="arena.maze">Лабиринт</option>
+    <option value="eight" data-i18n="arena.eight">Восьмёрка (перекрёсток)</option>
+    <option value="kegely" data-i18n="arena.kegely">Кегли (слалом)</option>
+    <option value="sandbox" data-i18n="arena.sandbox">Песочница</option>
+  </select>
+  <button id="btn-arena-edit" class="ibtn" data-i18n-tt="tt.arenaEdit"><svg><use href="#i-map"/></svg></button>
+  <select id="speed-select" data-i18n-tt="tt.speed">
+    <option value="0.25">×0.25</option>
+    <option value="0.5">×0.5</option>
+    <option value="1" selected>×1</option>
+    <option value="2">×2</option>
+    <option value="4">×4</option>
+  </select>
+  <div class="sep"></div>
+  <button id="btn-start" class="primary ibtn" data-i18n-tt="tt.start"><svg><use href="#i-play"/></svg></button>
+  <button id="btn-pause" class="ibtn" disabled data-i18n-tt="tt.pause"><svg><use href="#i-pause"/></svg></button>
+  <button id="btn-stop" class="ibtn" disabled data-i18n-tt="tt.stop"><svg><use href="#i-stop"/></svg></button>
+  <button id="btn-reset" class="ibtn" data-i18n-tt="tt.reset"><svg><use href="#i-reset"/></svg></button>
+  <span class="flex-spacer"></span>
+  <button id="btn-judge-eye" class="ibtn" data-i18n-tt="tt.judge"><svg><use href="#i-eye"/></svg></button>
+  <button id="btn-telemetry-eye" class="ibtn" data-i18n-tt="tt.telemetry"><svg><use href="#i-chart"/></svg></button>
+  <button id="btn-code-eye" class="ibtn" data-i18n-tt="tt.code"><svg><use href="#i-code"/></svg></button>
+  <button id="btn-builder" class="ibtn" data-i18n-tt="tt.builder"><svg><use href="#i-tool"/></svg></button>
+  <button id="btn-settings" class="ibtn" data-i18n-tt="tt.settings"><svg><use href="#i-gear"/></svg></button>
+  <button id="btn-help" class="ibtn" data-i18n-tt="tt.help"><svg><use href="#i-help"/></svg></button>
+  <div class="sep"></div>
+  <button id="btn-account" class="account-chip" data-role="guest" data-i18n-tt="tt.account">
+    <span class="ac-avatar" id="ac-avatar"><svg><use href="#i-user"/></svg></span>
+    <span class="ac-meta">
+      <span class="ac-name" id="ac-name" data-i18n="acc.guest">Гость</span>
+      <span class="ac-role" id="ac-role" data-i18n="acc.signin">Войти</span>
+    </span>
+  </button>
+  <span id="compile-status">готов</span>
+</header>
+
+<main id="main">
+  <section id="editor-pane">
+    <div id="editor-host"></div>
+    <div id="editor-status">
+      <button id="btn-import" data-i18n-tt="tt.import"><svg style="width:14px;height:14px;vertical-align:middle"><use href="#i-folder"/></svg></button>
+      <button id="btn-export" data-i18n-tt="tt.export"><svg style="width:14px;height:14px;vertical-align:middle"><use href="#i-save"/></svg></button>
+      <select id="examples-select" title="Примеры">
+        <option value="" data-i18n="examples">Примеры…</option>
+        <option value="line" data-i18n="ex.line">Линия (P-регулятор)</option>
+        <option value="maze" data-i18n="ex.maze">Лабиринт (правая рука)</option>
+        <option value="eight" data-i18n="ex.eight">Восьмёрка (ПД-регулятор)</option>
+        <option value="kegely" data-i18n="ex.kegely">Кегли (до зелёного)</option>
+        <option value="sandbox" data-i18n="ex.sandbox">Песочница (объезд)</option>
+      </select>
+      <span id="editor-msg" data-i18n="editor.autosave">Автосохранение включено</span>
+      <input type="file" id="file-input" accept=".ino,.txt" style="display:none">
+    </div>
+    <footer id="serial-pane">
+      <div id="serial-head">
+        <b data-i18n="serial.title">Serial-монитор</b>
+        <button id="serial-clear" data-i18n="serial.clear">Очистить</button>
+        <label class="chk"><input type="checkbox" id="serial-autoscroll" checked> <span data-i18n="serial.autoscroll">автоскролл</span></label>
+        <span id="serial-note" style="margin-left:auto"></span>
+      </div>
+      <pre id="serial-log"></pre>
+    </footer>
+  </section>
+  <div id="pane-resize" title="Потяните, чтобы изменить ширину редактора"></div>
+  <section id="viewport-pane">
+    <div id="judge">
+      <h4 id="judge-title" data-i18n="judge.title">Судейство</h4>
+      <div id="judge-rows"></div>
+      <div id="judge-events"></div>
+    </div>
+    <!-- Телеметрия: графики движения и датчиков, кнопка-глаз в тулбаре -->
+    <div id="telemetry">
+      <h4 data-i18n="tele.title">Телеметрия</h4>
+      <canvas id="tele-move" width="432" height="112"></canvas>
+      <div class="legend" id="tele-lg1"></div>
+      <canvas id="tele-sens" width="432" height="112"></canvas>
+      <div class="legend" id="tele-lg2"></div>
+    </div>
+    <div id="banner"><h2 id="banner-title"></h2><p id="banner-text"></p></div>
+  </section>
+</main>
+
+<!-- Оверлей: Настройки -->
+<div class="overlay" id="settings-overlay">
+  <div class="modal narrow">
+    <h3><svg class="bi"><use href="#i-gear"/></svg> <span data-i18n="ov.settings">Настройки</span> <span class="x" data-close="settings-overlay"><svg><use href="#i-close"/></svg></span></h3>
+    <div class="ctl">
+      <label data-i18n="set.theme">Тема</label>
+      <select id="set-theme">
+        <option value="dark" data-i18n="set.theme.dark">Тёмная</option>
+        <option value="light" data-i18n="set.theme.light">Светлая</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label data-i18n="set.lang">Язык интерфейса</label>
+      <select id="set-lang">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label data-i18n="set.noise">Шумы датчиков (реализм)</label>
+      <select id="set-noise">
+        <option value="0" data-i18n="set.off">Выкл</option>
+        <option value="1" data-i18n="set.low">Лёгкий</option>
+        <option value="2" data-i18n="set.mid">Средний</option>
+        <option value="3" data-i18n="set.high">Сильный</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label data-i18n="set.slip">Проскальзывание моторов</label>
+      <select id="set-slip">
+        <option value="0" data-i18n="set.off">Выкл</option>
+        <option value="1" data-i18n="set.low">Лёгкий</option>
+        <option value="2" data-i18n="set.mid">Средний</option>
+        <option value="3" data-i18n="set.high">Сильный</option>
+      </select>
+    </div>
+    <p class="hint" data-i18n="set.note">Примеры скетчей, справка и панели редакторов — на русском.</p>
+    <p><button class="primary" data-close="settings-overlay" data-i18n="btn.done">Готово</button></p>
+  </div>
+</div>
+
+<!-- Оверлей: Справка -->
+<div class="overlay" id="help-overlay">
+  <div class="modal" id="help-modal-body">
+    <h3><svg class="bi"><use href="#i-help"/></svg> <span data-i18n="ov.help">Справка</span> <span class="x" data-close="help-overlay"><svg><use href="#i-close"/></svg></span></h3>
+    <div id="help-content"></div>
+    <p><button class="primary" data-close="help-overlay" data-i18n="btn.close">Закрыть</button></p>
+  </div>
+</div>
+
+<!-- Оверлей: Аккаунт (вход / регистрация / профиль) -->
+<div class="overlay" id="account-overlay">
+  <div class="modal account-modal">
+    <button class="ac-close" data-close="account-overlay" aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+    <div class="ac-grid">
+      <aside class="ac-brand">
+        <div class="ac-brand-logo"><svg><use href="#i-robot"/></svg></div>
+        <h2><b>РобоАрена</b> 3D</h2>
+        <p class="ac-brand-sub" data-i18n="acc.brand.sub">Симулятор робо-гонок с настоящим Arduino-кодом.</p>
+        <ul class="ac-brand-points">
+          <li data-i18n="acc.brand.p1">Личная рабочая область.</li>
+          <li data-i18n="acc.brand.p2">Классы: руководитель и участники.</li>
+          <li data-i18n="acc.brand.p3">Работает офлайн.</li>
+        </ul>
+        <div class="ac-brand-foot" data-i18n="acc.brand.foot">Без аккаунта симулятор тоже полностью работает.</div>
+      </aside>
+      <section class="ac-main">
+        <!-- Вход / регистрация -->
+        <div id="ac-auth">
+          <div class="ac-tabs">
+            <button type="button" id="ac-tab-login" class="sel" data-i18n="acc.tab.login">Вход</button>
+            <button type="button" id="ac-tab-register" data-i18n="acc.tab.register">Регистрация</button>
+          </div>
+          <form id="ac-login-form" class="ac-form">
+            <label class="ac-field"><span data-i18n="acc.field.login">Логин</span>
+              <input id="ac-login-login" type="text" autocomplete="username" maxlength="24"></label>
+            <label class="ac-field"><span data-i18n="acc.field.password">Пароль</span>
+              <input id="ac-login-pass" type="password" autocomplete="current-password" maxlength="64"></label>
+            <div class="ac-err" id="ac-login-err"></div>
+            <button type="submit" class="primary ac-submit" data-i18n="acc.login.submit">Войти</button>
+            <p class="ac-hint-text" data-i18n="acc.login.hint">Логин и пароль задаются при регистрации на этом устройстве.</p>
+          </form>
+          <form id="ac-reg-form" class="ac-form" style="display:none">
+            <div class="ac-role-pick" id="ac-role-pick">
+              <button type="button" data-role="solo" class="sel">
+                <svg><use href="#i-user"/></svg>
+                <b data-i18n="acc.reg.solo">Отдельно</b>
+                <small data-i18n="acc.reg.solo.d">Личный аккаунт без класса.</small>
+              </button>
+              <button type="button" data-role="student">
+                <svg><use href="#i-grad"/></svg>
+                <b data-i18n="acc.reg.student">Участник класса</b>
+                <small data-i18n="acc.reg.student.d">Войти в класс по коду.</small>
+              </button>
+              <button type="button" data-role="teacher">
+                <svg><use href="#i-users"/></svg>
+                <b data-i18n="acc.reg.teacher">Создать класс</b>
+                <small data-i18n="acc.reg.teacher.d">Новый класс и код.</small>
+              </button>
+            </div>
+            <label class="ac-field"><span data-i18n="acc.field.name">Имя</span>
+              <input id="ac-reg-name" type="text" autocomplete="name" maxlength="40"></label>
+            <label class="ac-field"><span data-i18n="acc.field.login">Логин</span>
+              <input id="ac-reg-login" type="text" autocomplete="username" maxlength="24"></label>
+            <label class="ac-field"><span data-i18n="acc.field.password">Пароль</span>
+              <input id="ac-reg-pass" type="password" autocomplete="new-password" maxlength="64"></label>
+            <label class="ac-field" id="ac-reg-classcode-wrap" style="display:none"><span data-i18n="acc.field.classcode">Код класса</span>
+              <input id="ac-reg-classcode" type="text" maxlength="6" style="text-transform:uppercase;letter-spacing:2px"></label>
+            <label class="ac-field" id="ac-reg-classname-wrap" style="display:none"><span data-i18n="acc.field.classname">Название класса</span>
+              <input id="ac-reg-classname" type="text" maxlength="40"></label>
+            <div class="ac-err" id="ac-reg-err"></div>
+            <button type="submit" class="primary ac-submit" data-i18n="acc.reg.submit">Создать аккаунт</button>
+            <p class="ac-hint-text" data-i18n="acc.reg.hint">Пароль от 4 символов.</p>
+          </form>
+          <div class="ac-guest-row">
+            <button type="button" id="ac-guest" class="ac-link" data-i18n="acc.guest.continue">Продолжить без аккаунта</button>
+          </div>
+        </div>
+        <!-- Профиль -->
+        <div id="ac-profile" style="display:none">
+          <div class="ac-profile-head">
+            <span class="ac-avatar lg" id="ac-p-avatar">?</span>
+            <div>
+              <div class="ac-p-name" id="ac-p-name">—</div>
+              <div class="ac-p-login" id="ac-p-login">@—</div>
+            </div>
+            <span class="ac-badge" id="ac-p-role">—</span>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title" data-i18n="acc.profile.class">Класс</div>
+            <div id="ac-p-class-body"></div>
+          </div>
+          <div class="ac-card">
+            <div class="ac-card-title" data-i18n="acc.profile.workspace">Рабочая область</div>
+            <div class="ac-stats" id="ac-p-stats"></div>
+            <div class="ac-row">
+              <button type="button" id="ac-save-ws" class="primary" data-i18n="acc.profile.save">Сохранить работу</button>
+              <button type="button" id="ac-load-ws" data-i18n="acc.profile.load">Загрузить</button>
+            </div>
+          </div>
+          <div class="ac-row ac-profile-actions">
+            <button type="button" id="ac-edit-name" data-i18n="acc.profile.rename">Изменить имя</button>
+            <button type="button" id="ac-logout" data-i18n="acc.profile.logout">Выйти</button>
+            <button type="button" id="ac-delete" class="warn" data-i18n="acc.profile.delete">Удалить аккаунт</button>
+          </div>
+          <div class="ac-err" id="ac-profile-msg"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/codemirror/codemirror.min.js"></script>
+<script src="vendor/codemirror/clike.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "cannon-es": "./vendor/cannon-es.js"
+  }
+}
+</script>
+<script>
+// ── Аварийный загрузчик (ПН10). Живёт вне ES-модулей, поэтому исполняется всегда —
+// в том числе когда модули заблокированы (страница открыта как file://) или упали.
+// Без него любой сбой старта выглядит как «кнопки есть, ничего не работает» без объяснений:
+// статичная HTML-разметка отрисовалась, а весь JS (сцена, робот, редактор кода, обработчики)
+// так и не запустился. Здесь: ловим ошибки, ждём сигнал успеха (window.__APP ставится в
+// конце инициализации main.js) и в случае сбоя показываем понятную плашку с действиями.
+(function () {
+  var gone = false; // приложение успешно стартовало — плашка больше не показывается
+  function banner(title, sub) {
+    if (gone) return;
+    var b = document.getElementById('boot-banner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'boot-banner';
+      b.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:9999;'
+        + 'max-width:min(92vw,560px);padding:10px 14px;border-radius:10px;background:#3b1414;'
+        + 'color:#ffd9d9;border:1px solid #a33;font:13px/1.5 system-ui,sans-serif;'
+        + 'box-shadow:0 6px 24px rgba(0,0,0,.35);white-space:pre-line;text-align:center';
+      (document.body || document.documentElement).appendChild(b);
+    }
+    b.textContent = title + (sub ? '\n' + sub : '');
+  }
+  function ok() {
+    gone = true;
+    var b = document.getElementById('boot-banner');
+    if (b) b.remove();
+  }
+  // capture=true — ловим и ошибки исполнения, и неудачную загрузку ресурсов (например,
+  // отказ браузера грузить module-скрипт с file://), которые мимо capture не проходят.
+  window.addEventListener('error', function (e) {
+    if (gone) return;
+    var m = (e && e.message) || '';
+    var t = e && e.target && e.target.tagName;
+    if (t === 'SCRIPT' || t === 'LINK') {
+      m = 'не загрузился ' + t.toLowerCase() + ' ' + ((e.target && (e.target.src || e.target.href)) || '');
+    }
+    banner('Ошибка запуска: ' + (m || 'неизвестная'),
+      'Обнови страницу (Ctrl+F5). Не помогло — перезапусти сервер (py -3 server.py).');
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    if (gone) return;
+    var r = e && e.reason;
+    banner('Ошибка запуска: ' + (r && (r.stack || r.message) || String(r)),
+      'Обнови страницу (Ctrl+F5). Не помогло — перезапусти сервер (py -3 server.py).');
+  });
+  var tries = 0;
+  var iv = setInterval(function () {
+    if (window.__APP) { ok(); clearInterval(iv); return; }
+    if (++tries > 16) { // ~8 с — модуль так и не стартовал
+      clearInterval(iv);
+      if (location.protocol === 'file:') {
+        banner('Страница открыта как файл, а не через сервер — браузер блокирует модули.',
+          'Запусти сервер: py -3 server.py — и открой http://localhost:8123');
+      } else {
+        banner('Приложение не стартовало за 8 секунд.',
+          'Обнови страницу (Ctrl+F5). Не помогло — открой сайт заново позже.');
+      }
+    }
+  }, 500);
+})();
+</script>
+<script type="module" src="src/main.js?v=104"></script>
+</body>
+</html>
